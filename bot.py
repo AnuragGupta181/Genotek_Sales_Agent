@@ -6,6 +6,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import anthropic
 from supabase import create_client, Client
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
