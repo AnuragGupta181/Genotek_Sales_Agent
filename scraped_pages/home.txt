@@ -1,0 +1,13 @@
+Genotek Sales Support Agent
+Genotek Sales Support Agent
+Plan & Architecture — Built from 14,145 emails | 3,565 threads | 18 months verified data
+Architecture & Flow Diagrams
+Nate-style document: problem → architecture → Mermaid flow diagrams → tool stack comparison → 2-day build map. Every step labeled VERIFIED or ASSUMED.
+START HERE
+Detailed Build Map
+Every workflow step numbered with comment boxes for review. QA/QC failure report. Tool stack comparison table. Pricing logic. People map. Known gaps.
+AUDIT TRAIL
+Operations Flowchart
+28-tab interactive flowchart covering all operational workflows — quotation, submittal, order-to-delivery, supplier management, regional handling.
+REFERENCE
+April 2026 — Genotek Global | Not for public distribution

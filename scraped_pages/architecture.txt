@@ -1,0 +1,804 @@
+Genotek Sales Support Agent — Architecture & Flow Diagrams
+Genotek Sales Support Agent
+Architecture Document — Nate B. Jones Framework Applied to Genotek Global
+Built from: 14,145 emails | 3,565 threads | 211 projects | 18 months verified data
+1. The Problem
+2. Architecture
+3. Quotation Flow
+4. Follow-Up Flow
+5. Order Flow
+6. Pricing Engine
+7. Memory Schema
+8. Tool Stack
+9. Trust Levels
+10. Build Map
+11. Gaps & Questions
+1. What Problem Does This Agent Solve?
+Nate's first question:
+"What's the single workflow that, if automated, would change the trajectory of this business?"
+Genotek Global sells expansion joint covers across India, GCC, and Southeast Asia. One person — AK (Anutashaya Kumar) — handles 86% of all email traffic. She processes 16 quotes per business day. She's fast (33-minute quote turnaround when pricing is available). She's reliable. And the business is hemorrhaging revenue anyway.
+Why?
+Three numbers from the 18-month email audit tell the story:
+The Revenue Leak
+pie title Where 3,565 Quote Threads End Up
+    "Got Follow-Up (50.8%)" : 50.8
+    "ZERO Follow-Up (39.1%)" : 39.1
+    "Dormant (10.1%)" : 10.1
+39.1% of all quotation threads receive zero follow-up.
+That's 1,394 threads over 18 months. At a 12% conversion rate, that's roughly 167 orders that died by silence — not by rejection. Nobody said no. AK just didn't follow up, because she's buried under 146+ concurrent projects with no system telling her what to chase.
+The second number:
+7% project completion rate.
+Of 211 tracked projects, only 15 reached completion. The rest stalled somewhere in the pipeline — pricing not returned, specs incomplete, follow-up never sent, PO stuck in approval.
+The third number:
+96 days.
+That's the threshold after which a deal is effectively dead. No thread in the audit data recovered after 96 days of silence.
+This is not an AK problem.
+AK executes everything — 522 decisions per 18 months on her own authority. But she has ZERO pricing authority. Every single quote requires escalation to Bijoy, Shylesh, or Niranjan. The bottleneck is the system, not the person.
+Nate's second question:
+"What does the agent actually DO — and what does it absolutely NOT do?"
+This agent is a
+Sales Support Agent
+— not an autonomous sales manager. It supports AK and the team. Specifically:
+Agent DOES
+Agent NEVER DOES
+Classify incoming RFQs by region, product, urgency
+Set any price, ever
+Route pricing requests to correct authority
+Approve discounts
+Draft quotes using verified templates
+Send to client without human approval (at Level 0)
+Schedule and send project-specific follow-ups
+Commit delivery dates without supplier confirmation
+Flag deals going cold (approaching 96-day death)
+Negotiate with clients
+Track supplier status and lead times
+Approve POs (Shylesh's job)
+Store learnings in Open Brain memory
+Make strategic decisions
+2. System Architecture
+Nate's Three Lego Bricks:
+Memory (Open Brain) + Proactivity (scheduled heartbeats) + Tools (MCP connections). Every agent needs all three or it's just a chatbot.
+System Architecture — Nate's Three Bricks Applied to Genotek
+graph TB
+    subgraph TOOLS["🔧 TOOLS (MCP Connections)"]
+        GM[Gmail MCP
+Read/Draft/Send]
+        SB[Supabase MCP
+Product DB + Memory]
+        HS[HubSpot MCP
+CRM Sync]
+        CAL[Calendar MCP
+Follow-up Scheduling]
+    end
+
+    subgraph BRAIN["🧠 BRAIN (Claude API)"]
+        H[Haiku 4.5
+Triage + Classification
+$0.25/1M tokens]
+        S[Sonnet 4.6
+Quote Drafting + Routing
+$3/1M tokens]
+        O[Opus 4.6
+Complex Pricing Logic
+$5/1M tokens]
+    end
+
+    subgraph MEMORY["💾 MEMORY (Open Brain)"]
+        OB[Supabase + pgvector
+Client preferences
+Quote history
+Supplier patterns
+Deal lifecycle state]
+    end
+
+    subgraph PROACTIVE["⏰ PROACTIVITY (Scheduled)"]
+        FU[Follow-Up Scheduler
+Day 3/7/14/30]
+        DD[Deal Death Detector
+96-day threshold]
+        ON[Overnight Analysis
+Supplier status + Patterns]
+    end
+
+    subgraph HUMANS["👤 HUMANS (Trust Gates)"]
+        AK[AK — Reviews drafts
+Sends approved quotes]
+        BJ[Bijoy — Pricing authority
+Strategic decisions]
+        SH[Shylesh — PO approval
+Quality gate]
+        NR[Niranjan — India pricing
+Pidilite channel]
+    end
+
+    GM --> H
+    H -->|"classify RFQ"| S
+    S -->|"draft quote"| AK
+    AK -->|"approve/revise"| GM
+    S -->|"pricing needed"| BJ
+    S -->|"pricing needed"| SH
+    S -->|"pricing needed"| NR
+    OB <-->|"store/recall"| S
+    FU -->|"trigger"| S
+    DD -->|"alert"| BJ
+    ON -->|"overnight batch"| OB
+
+    style TOOLS fill:#eff6ff,stroke:#3b82f6
+    style BRAIN fill:#fef3c7,stroke:#f59e0b
+    style MEMORY fill:#f0fdf4,stroke:#22c55e
+    style PROACTIVE fill:#fce7f3,stroke:#ec4899
+    style HUMANS fill:#fef2f2,stroke:#ef4444
+MCP Sidecar Rule (from Nate):
+MCP connections add 300-800ms latency. NEVER put them in the customer-facing hot path. Use MCP for overnight batch analysis, data sync, and background tasks. Real-time quote drafting uses cached data from Open Brain, not live MCP calls.
+Model Routing — From the Claude Code Leak
+graph LR
+    IN[Incoming Task] --> R{Complexity?}
+    R -->|"Simple: triage, classify, remind"| H[Haiku $0.25/M
+or DeepSeek $0.28/M]
+    R -->|"Medium: draft quote, route pricing"| S[Sonnet $3/M]
+    R -->|"Complex: pricing logic, exceptions"| O[Opus $5/M]
+
+    H -->|"~80% of tasks"| OUT[Output]
+    S -->|"~15% of tasks"| OUT
+    O -->|"~5% of tasks"| OUT
+
+    OUT --> COST["Est. $15-40/mo
+at 16 quotes/day"]
+
+    style H fill:#dcfce7,stroke:#166534
+    style S fill:#fef9c3,stroke:#854d0e
+    style O fill:#fef2f2,stroke:#991b1b
+    style COST fill:#eff6ff,stroke:#3b82f6
+Bijoy: Does this cost range work? $15-40/month for the AI layer. Plus Supabase free tier. Plus your existing Gmail.
+3. Quotation Workflow — Full Flow Diagram
+979 instances in Q1 alone. Every decision point labeled. Every step tagged verified or assumed.
+WF1: Quotation — End to End
+flowchart TD
+    A["1. RFQ Received
+📧 Email / Channel Partner
+VERIFIED
+"] --> B{"2. Specs Complete?
+VERIFIED: 65% yes, 35% no
+"}
+
+    B -->|"YES (65%)"| D
+    B -->|"NO (35%)"| C["3. Request Missing Specs
+👤 Agent drafts → AK reviews
+VERIFIED
+it happens
+ASSUMED
+agent does it"]
+    C -->|"Specs received
+(days to weeks)"| D
+
+    D{"4. Which Market?
+VERIFIED
+"} -->|"UAE < AED 100/LM"| E1["5a. → Shylesh
+Auto-approve small items
+VERIFIED
+"]
+    D -->|"KSA > SAR 500K"| E2["5b. → Bijoy
+Large deal approval
+VERIFIED
+"]
+    D -->|"India"| E3["5c. → Niranjan
+Pidilite channel
+VERIFIED
+"]
+    D -->|"Discount > 15%"| E4["5d. → Bijoy ALWAYS
+VERIFIED
+"]
+    D -->|"Turkey custom"| E5["5e. → Ankara Factory
+29-day baseline
+VERIFIED
+"]
+    D -->|"International / Other"| E6["5f. → Bijoy
+VERIFIED
+"]
+
+    E1 --> F["6. Price Received
+⏱️ 33 min (best) to 36 days (worst)
+VERIFIED
+"]
+    E2 --> F
+    E3 --> F
+    E4 --> F
+    E5 --> F
+    E6 --> F
+
+    F --> G["7. Agent Compiles Quote
+Template: [Country].[Product].[Project].[AK].[Rev].pdf
+Greeting: Dear [Name]
+Sign-off: Best Regards;
+BCC tracking ~90%
+ALL VERIFIED
+"]
+
+    G --> H{"8. Human Review?
+ASSUMED
+Does not exist today"}
+
+    H -->|"Approved"| I["9. Quote Sent
+📧 16/day average
+VERIFIED
+"]
+    H -->|"Revise"| G
+
+    I --> J{"10. Follow-Up?
+VERIFIED (problem)
+"}
+
+    J -->|"50.8%"| K["11a. Follow-Up Sent
+Current: Generic 'A Kind reminder'
+Proposed: Project-specific Day 3/7/14/30
+VERIFIED
+problem
+ASSUMED
+solution"]
+    J -->|"39.1%"| L["11b. ❌ ZERO FOLLOW-UP
+1,394 threads lost
+~167 potential orders
+VERIFIED — #1 REVENUE LEAK
+"]
+    J -->|"10.1%"| M["11c. Dormant
+No action ever taken
+VERIFIED
+"]
+
+    K --> N{"12. Outcome
+VERIFIED
+"}
+    N -->|"12% Won"| O["✅ Order Confirmed
+→ WF3: Order-to-Delivery"]
+    N -->|"3% Lost"| P["❌ Lost
+No loss template exists
+VERIFIED
+"]
+    N -->|"28% Pending"| Q["⏳ Needs re-engagement"]
+    N -->|"96+ days"| R["💀 Dead Deal
+VERIFIED: 96 days = dead
+"]
+
+    style A fill:#eff6ff,stroke:#3b82f6
+    style L fill:#fef2f2,stroke:#ef4444,stroke-width:3px
+    style R fill:#fef2f2,stroke:#ef4444
+    style O fill:#f0fdf4,stroke:#22c55e
+    style H fill:#fef9c3,stroke:#eab308
+Step 8: Do you want a human review gate on every quote? Or can routine quotes (repeat client, standard product, standard pricing) go out without review?
+Step 11: What follow-up cadence? Day 3/7/14/30 is assumed. Should GCC get different timing than India?
+Step 5a: Is AED 100/LM still Shylesh's current threshold?
+4. Follow-Up System — Closing the 39.1% Leak
+WF4: Follow-Up Decision Tree
+flowchart TD
+    A["Quote Sent
+Timer starts"] --> B{"Day 3
+Any response?"}
+
+    B -->|"Yes → client engaged"| C["Log response
+Update deal status
+Continue conversation"]
+    B -->|"No response"| D["Send Follow-Up #1
+'Confirming receipt of quotation
+for [PROJECT] — [PRODUCTS]'
+ASSUMED template
+"]
+
+    D --> E{"Day 7
+Any response?"}
+    E -->|"Yes"| C
+    E -->|"No"| F["Send Follow-Up #2
+'Following up on [PROJECT]
+— questions on specs/pricing?'
+ASSUMED template
+"]
+
+    F --> G{"Day 14
+Any response?"}
+    G -->|"Yes"| C
+    G -->|"No"| H["Send Follow-Up #3
+'Checking in on [PROJECT]
+— timeline for decision?'
+ASSUMED template
+"]
+
+    H --> I{"Day 30
+Any response?"}
+    I -->|"Yes"| C
+    I -->|"No"| J["🚨 Escalate to Bijoy
+'Deal going cold: [PROJECT]'
+ASSUMED escalation rule
+"]
+
+    J --> K{"Day 60
+Bijoy decision"}
+    K -->|"Re-engage"| L["Special outreach
+Bijoy direct / call"]
+    K -->|"Archive"| M["Mark DORMANT
+Store in Open Brain
+for future reference"]
+
+    C --> N{"Deal moving?"}
+    N -->|"Yes"| O["Continue to
+negotiation / order"]
+    N -->|"Stalled again"| B
+
+    style D fill:#eff6ff,stroke:#3b82f6
+    style F fill:#eff6ff,stroke:#3b82f6
+    style H fill:#fef9c3,stroke:#eab308
+    style J fill:#fef2f2,stroke:#ef4444
+    style M fill:#f1f5f9,stroke:#94a3b8
+Every template and timing in this flow is ASSUMED.
+The only VERIFIED fact is that the current system fails — 39.1% zero follow-up, and AK's existing template ("A Kind reminder for your action!") was explicitly criticized by Paul Paffett at Innivate for being too generic.
+Define the actual cadence: Day 3/7/14/30 or something else?
+Should follow-up language change by region? GCC expects more formal language. India more relationship-oriented?
+At what point does Bijoy get alerted? Day 30? Day 14 for large deals?
+Should there be a phone call step before email escalation?
+Send Timing by Region
+gantt
+    title Optimal Send Windows (All ASSUMED — needs validation)
+    dateFormat HH:mm
+    axisFormat %H:%M
+
+    section GCC (GST UTC+4)
+    Business hours    :08:00, 8h
+
+    section India (IST UTC+5:30)
+    Business hours    :10:00, 8h
+
+    section SEA (SGT UTC+8)
+    Business hours    :09:00, 8h
+
+    section NZ (NZST UTC+12)
+    Business hours    :09:00, 8h
+The audit shows HubSpot sends follow-ups at 2:31 AM. That's clearly wrong. But what time IS right for each region?
+5. Order-to-Delivery Workflow
+WF3: Order to Delivery — Swim Lanes
+flowchart TD
+    A["1. Client PO Received
+VERIFIED
+"] --> B["2. AK Logs & Acknowledges
+VERIFIED
+"]
+
+    B --> C["3. Shylesh PO Approval
+⚠️ No defined SLA
+VERIFIED bottleneck
+"]
+
+    C --> D{"4. Approved?"}
+    D -->|"Yes"| E["5. Generate Supplier PO
+Route to correct supplier
+VERIFIED mapping
+"]
+    D -->|"Delayed"| C2["Escalate to Bijoy?
+ASSUMED: 48hr trigger
+"]
+    C2 --> C
+
+    E --> F{"6. Which Supplier?
+VERIFIED
+"}
+    F -->|"Turkey (Ankara)"| G1["7a. PO to Tuncay
+29-day baseline
+VERIFIED
+"]
+    F -->|"RY Extrusion"| G2["7b. PO to RY
+75-85 day dies
+VERIFIED
+"]
+    F -->|"MPP"| G3["7c. PO to MPP
+⚠️ Payment issues
+VERIFIED
+"]
+    F -->|"Other (13+ suppliers)"| G4["7d. PO to supplier
+PARTIAL — lead times unknown
+"]
+
+    G1 --> H["8. Production Tracking
+Method: email check-ins
+PARTIAL
+"]
+    G2 --> H
+    G3 --> H
+    G4 --> H
+
+    H --> I{"9. Exception?
+VERIFIED: 1,210 over 18mo
+"}
+    I -->|"No"| J["10. Production Complete"]
+    I -->|"Delay"| K["Escalate
+Who decides?
+ASSUMED
+"]
+    I -->|"Force Majeure"| K
+    I -->|"Payment Block"| K
+    K --> H
+
+    J --> L["11. Shipping
+Sea: 6-8 wk (Turkey→GCC)
+Air: urgent
+Local: India
+PARTIAL
+"]
+
+    L --> M["12. Delivery Confirmed
+PARTIAL
+"]
+
+    M --> N["13. Post-Delivery
+Installation? Warranty?
+⚠️ COMPLETELY UNKNOWN
+Not in email data"]
+
+    style N fill:#fef2f2,stroke:#ef4444,stroke-width:3px
+    style C fill:#fef9c3,stroke:#eab308
+    style G3 fill:#fef9c3,stroke:#eab308
+Step 3: What is Shylesh's PO approval SLA? 24 hours? 48? Is there a dollar threshold below which AK can proceed without him?
+Step 9: Who handles exceptions? Different people for different exception types?
+Step 11: Who coordinates shipping? AK? A logistics partner? Different per region?
+Step 13: CRITICAL GAP — What happens after delivery? Who handles installation support, warranty claims, defect reports? This entire phase is invisible in email. Does it happen off-email (phone/WhatsApp)? Or does it not happen?
+6. Pricing Engine
+Pricing Decision Flow
+flowchart TD
+    A["RFQ with product codes + quantities"] --> B{"Which Market?"}
+
+    B -->|"UAE"| C{"Value < AED 100/LM?"}
+    C -->|"Yes"| C1["Shylesh auto-quotes
+GM target: 55%+
+VERIFIED authority
+PARTIAL GM target
+"]
+    C -->|"No"| C2["Escalate to Bijoy
+VERIFIED
+"]
+
+    B -->|"KSA"| D{"Value > SAR 500K?"}
+    D -->|"No"| D1["Standard pricing
+Material × 2-3X + Shipping × 1.5-2X
+PARTIAL — ranges not exact
+"]
+    D -->|"Yes"| D2["Bijoy approval required
+VERIFIED
+"]
+
+    B -->|"India"| E["Niranjan via Pidilite
+Base price + Installation
+Competitor undercut: 10-40%
+VERIFIED structure
+PARTIAL rates
+"]
+
+    B -->|"SEA"| F["Ankara source × 2.5X material
++ Sea freight × 2X
+PARTIAL
+"]
+
+    B -->|"Any market"| G{"Discount > 15%?"}
+    G -->|"Yes"| G1["BIJOY ALWAYS
+VERIFIED
+"]
+    G -->|"No"| G2["Standard approval path"]
+
+    style C1 fill:#f0fdf4,stroke:#22c55e
+    style C2 fill:#fef9c3,stroke:#eab308
+    style D2 fill:#fef9c3,stroke:#eab308
+    style G1 fill:#fef2f2,stroke:#ef4444
+CRITICAL DATA GAP:
+The pricing engine cannot function without exact multipliers per product family. The audit shows ranges (2-3X material, 1.5-2X shipping) but not product-specific values. Without a product master data sheet, the agent can ROUTE pricing requests but cannot CALCULATE prices.
+Does a product master data sheet exist? Excel? ERP? Or is pricing knowledge entirely in Bijoy's and Shylesh's heads?
+Are the multiplier ranges (2-3X, 1.5-2X) still current? Have they changed?
+How does volume discount work? Thresholds? Percentages? Customer-specific?
+7. Memory Schema — Open Brain Design
+Nate's memory principle:
+"Your agent is only as good as what it remembers. Memory isn't a feature — it's the competitive moat."
+Open Brain Memory Architecture
+erDiagram
+    CLIENTS {
+        uuid id PK
+        string name
+        string company
+        string region
+        string email
+        string preferred_honorific
+        string channel_partner
+        text preferences_notes
+        timestamp last_contact
+        int total_quotes
+        int total_orders
+        float conversion_rate
+    }
+
+    QUOTES {
+        uuid id PK
+        uuid client_id FK
+        string project_name
+        string products
+        float value
+        string region
+        string pricing_authority
+        string status
+        timestamp sent_at
+        timestamp last_followup
+        int followup_count
+        int days_since_sent
+    }
+
+    SUPPLIERS {
+        uuid id PK
+        string name
+        string products
+        int avg_lead_days
+        string payment_status
+        text known_issues
+        timestamp last_po
+    }
+
+    PROJECTS {
+        uuid id PK
+        string name
+        uuid client_id FK
+        string stage
+        float value
+        string region
+        timestamp created
+        timestamp last_activity
+        boolean is_dead
+    }
+
+    LEARNINGS {
+        uuid id PK
+        string category
+        text pattern
+        text evidence
+        timestamp discovered
+        boolean verified
+    }
+
+    CLIENTS ||--o{ QUOTES : "requests"
+    CLIENTS ||--o{ PROJECTS : "has"
+    QUOTES }o--|| SUPPLIERS : "sourced_from"
+What gets stored (VERIFIED from audit):
+Client name, company, region, channel partner, preferred honorific ("Ji" for India, "Eng" for KSA, "Sir" for internal), quote history, follow-up history, project lifecycle state.
+What gets stored (ASSUMED):
+Conversion rate per client, supplier reliability scores, pricing patterns, deal death predictions. These need to be built over time as the agent learns.
+Should memory include WhatsApp/phone interactions or just email?
+How long should client data be retained? Forever? Or decay after 2 years of no contact?
+8. Tool Stack Comparison
+The real question:
+What can one person set up in 2 days that handles 16 quotes/day across 4 regions?
+Framework Comparison
+quadrantChart
+    title Build Speed vs Production Readiness
+    x-axis "Slow to Build" --> "Fast to Build"
+    y-axis "Prototype Only" --> "Production Ready"
+
+    "Nate Stack (Claude+MCP+OB)": [0.75, 0.70]
+    "OpenClaw": [0.80, 0.55]
+    "AgentScope": [0.35, 0.85]
+    "Raw Claude API": [0.60, 0.40]
+    "Hybrid (OpenClaw+Claude)": [0.65, 0.75]
+Option
+Build Time
+Monthly Cost
+WhatsApp?
+Multi-Model?
+Verdict
+Nate Stack
+Claude + MCP + Open Brain
+2 days
+$20 seat + $30-80 API
+No (email only)
+No (Claude only)
+START HERE
+You already have Open Brain working
+OpenClaw
+Open-source, 247K stars
+1 day
+$10-20 (API only)
+Yes (native)
+Yes (Claude, GPT, DeepSeek, Qwen, local)
+ADD LATER
+Great for WhatsApp layer. Security concerns with community skills.
+AgentScope
+Alibaba-backed, enterprise
+1-2 weeks
+$10-50 (API only)
+Not native
+Yes (all providers + local)
+OVERKILL
+Multi-agent orchestration for a team of 1? Revisit when team grows.
+Hybrid
+OpenClaw interface + Claude brain + DeepSeek for routine
+2-3 days
+$15-40 (model routing)
+Yes
+Yes
+BEST LONG-TERM
+But start with Nate Stack first, add OpenClaw in Week 2.
+What the Claude Code Leak Tells Us
+On March 31, 2026, Chaofan Shou found Claude Code's full source in a leaked npm source map. 512,000 lines, 1,900 files. What matters for building our agent:
+Finding
+How We Use It
+Prompt cache economics are core design
+— 14 cache-break vectors tracked
+Cache the product catalog + pricing rules as a persistent prefix. Saves 90% on repeat queries.
+Orchestration is a prompt, not code
+— multi-agent coordination via system prompts
+Don't build a complex orchestration framework. Claude coordinates sub-tasks via instructions.
+Model routing is standard
+— different tasks get different models internally
+Use Haiku/DeepSeek for triage (80% of tasks), Sonnet for drafting (15%), Opus for exceptions (5%).
+250K wasted API calls/day fixed by 3-line change
+Monitor costs from Day 1. Small fixes have outsized impact.
+9. Trust Level Progression
+Nate's trust principle:
+"Start at Level 0 — information only. The agent earns trust by being right, not by being fast."
+Trust Progression Path
+flowchart LR
+    L0["
+Level 0
+INFO ONLY
+─────────
+Agent drafts
+Human reviews ALL
+Human sends ALL
+─────────
+Duration: Week 1-2"]
+
+    L1["
+Level 1
+DRAFT + REVIEW
+─────────
+Agent drafts + sends
+ROUTINE quotes only
+Human reviews exceptions
+─────────
+Trigger: 95% accuracy
+on 50+ drafts"]
+
+    L2["
+Level 2
+AUTO-ROUTINE
+─────────
+Agent auto-sends routine
+Agent flags exceptions
+Human handles complex
+─────────
+Trigger: 98% accuracy
+on 200+ sends"]
+
+    L3["
+Level 3
+AUTONOMOUS
+─────────
+Agent handles most tasks
+within defined boundaries
+Human = strategic only
+─────────
+Trigger: TBD by Bijoy"]
+
+    L0 -->|"Earn it"| L1
+    L1 -->|"Earn it"| L2
+    L2 -->|"Earn it"| L3
+
+    style L0 fill:#fef2f2,stroke:#ef4444
+    style L1 fill:#fef9c3,stroke:#eab308
+    style L2 fill:#eff6ff,stroke:#3b82f6
+    style L3 fill:#f0fdf4,stroke:#22c55e
+The entire trust progression is ASSUMED.
+The thresholds (95% accuracy, 50+ drafts, etc.) are made up. Bijoy needs to define: what does "good enough" look like for each level? What accuracy rate? How many successful sends? Who decides when to promote?
+What accuracy rate on drafts triggers Level 1? 90%? 95%? 99%?
+Who approves each level transition? Just Bijoy? Or AK + Bijoy together?
+Are there specific task types that should NEVER go above Level 1? (e.g., large KSA deals always need human review?)
+10. 2-Day Build Map
+Build Timeline
+gantt
+    title Sales Support Agent — 2-Day Build
+    dateFormat HH:mm
+    axisFormat %H:%M
+
+    section Day 1 — Core
+    Email Intake + Classification     :d1a, 09:00, 2h
+    Pricing Router (all 6 branches)   :d1b, after d1a, 1h
+    Quote Template Engine             :d1c, after d1b, 1h
+    Follow-Up Scheduler               :d1d, after d1c, 1h
+    Trust Level 0 Gate                :d1e, after d1d, 1h
+    Open Brain Memory Setup           :d1f, after d1e, 1h
+    Test with 5 Historical RFQs      :d1g, after d1f, 1h
+
+    section Day 2 — Intelligence
+    Supplier Status Dashboard         :d2a, 09:00, 2h
+    Pricing Logic Engine              :d2b, after d2a, 1h
+    Deal Death Detector (96-day)      :d2c, after d2b, 1h
+    Shylesh Bottleneck Router         :d2d, after d2c, 1h
+    Overnight Analysis Jobs           :d2e, after d2d, 1h
+    Guardrails & Hard Boundaries      :d2f, after d2e, 1h
+    End-to-End Simulation Test        :d2g, after d2f, 1h
+Prerequisites (before Day 1)
+Item
+Status
+Action
+Open Brain (Supabase + pgvector)
+DONE
+Already running
+Claude API key
+DONE
+Already have
+Gmail MCP server
+NEEDED
+Configure connection to ak@genotek.uk or operations@genotek.uk
+Product master data
+CRITICAL GAP
+Bijoy provides — even a rough Excel works
+Pricing multiplier table
+CRITICAL GAP
+Bijoy provides — per product family, per market
+Can you provide product master data in ANY format? Excel, Google Sheet, even a rough list? The agent cannot quote without knowing what products exist.
+Which Gmail account should the agent read? ak@genotek.uk? operations@genotek.uk? Both?
+11. All Questions — For Manual Audit
+Every question from every tab, consolidated. Number matches the workflow step where it appears.
+CRITICAL (blocks the build)
+#
+Question
+From
+Q1
+Does a product master data sheet exist? 78+ models need specs, pricing per market, supplier mapping. Even a rough Excel.
+Pricing Engine
+Q2
+What are exact pricing multipliers per product family? (Currently we only have ranges: 2-3X material, 1.5-2X shipping)
+Pricing Engine
+Q3
+What follow-up cadence do you want? Day 3/7/14/30? Different by region? By deal size?
+Follow-Up Flow
+Q4
+Which Gmail account should the agent read? ak@ / operations@ / both?
+Build Map
+HIGH (affects accuracy)
+#
+Question
+From
+Q5
+What happens after delivery? Installation support? Warranty claims? Who handles it? (Invisible in email data)
+Order Flow Step 13
+Q6
+What is Shylesh's PO approval SLA? 24h? 48h? Is there a $ threshold below which AK proceeds without him?
+Order Flow Step 3
+Q7
+Jayanth vs AK for India — who has what authority? Overlap or clear split?
+People Map
+Q8
+Is AED 100/LM still Shylesh's current autonomous pricing threshold?
+Quotation Flow Step 5a
+Q9
+Do you want a human review gate on every quote (Level 0)? Or can routine quotes auto-send from Day 1?
+Quotation Flow Step 8
+Q10
+Who approves trust level transitions? What accuracy rate triggers each level?
+Trust Levels
+MEDIUM (improves quality)
+#
+Question
+From
+Q11
+Should follow-up language change by region? GCC more formal, India more relationship-oriented?
+Follow-Up Flow
+Q12
+What analysis do you want to see every morning? (Overnight job output)
+Build Map Day 2
+Q13
+How does AK currently track production? Manual emails? Supplier portals?
+Order Flow Step 8
+Q14
+What's the submittal rejection rate? What are common revision requests?
+Submittal Flow
+Q15
+At what deal age does Bijoy get personally alerted? Day 30? Day 14 for large deals?
+Follow-Up Flow
+Q16
+Is ryextrsuion.com the real domain or a typo?
+Supplier Mgmt
+Q17
+Monthly cost budget for AI — is $15-40/month acceptable?
+Architecture
+How to use this document:
+Go through each question. Answer it, correct it, or mark it "doesn't matter." Every answer directly improves the agent's accuracy on Day 1. The questions marked CRITICAL are hard blockers — the build cannot start without Q1-Q4 answered.
