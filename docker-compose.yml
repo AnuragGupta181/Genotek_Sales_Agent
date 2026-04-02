@@ -1,0 +1,25 @@
+# =============================================================================
+# Genotek Sales Support Telegram Bot -- Docker Compose
+# =============================================================================
+
+version: '2.1'
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: genotek-telegram-bot
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./bot.log:/app/bot.log
+    restart: unless-stopped
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge
