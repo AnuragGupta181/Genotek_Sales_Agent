@@ -6,6 +6,181 @@ Built from verified data: **14,145 emails | 3,565 threads | 211 projects | 18 mo
 
 ---
 
+## 🛠️ Local Setup
+
+### Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| **Python** | 3.10+ (recommended 3.11) | [python.org/downloads](https://www.python.org/downloads/) |
+| **pip** | Latest | Ships with Python |
+| **Git** | Any recent version | [git-scm.com](https://git-scm.com/) |
+| **AWS Account** | — | With Bedrock access enabled for Claude models |
+| **Supabase Project** | — | Free tier works ([supabase.com](https://supabase.com/)) |
+| **Telegram Bot Token** | — | Create via [@BotFather](https://t.me/BotFather) |
+
+---
+
+### Step 1 — Clone the Repository
+
+```bash
+git clone https://github.com/AnuragGupta181/Genotek_Sales_Agent.git
+cd Genotek_Sales_Agent
+```
+
+---
+
+### Step 2 — Create a Virtual Environment
+
+<details>
+<summary><strong>🐧 Linux / macOS</strong></summary>
+
+```bash
+# Create the virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate
+```
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows (PowerShell)</strong></summary>
+
+```powershell
+# Create the virtual environment
+python -m venv venv
+
+# Activate it
+.\venv\Scripts\Activate.ps1
+```
+
+> **Note:** If you get a script-execution policy error, run this first (as Administrator):
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows (Command Prompt)</strong></summary>
+
+```cmd
+python -m venv venv
+venv\Scripts\activate.bat
+```
+
+</details>
+
+---
+
+### Step 3 — Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### Step 4 — Configure Environment Variables
+
+```bash
+# Linux / macOS
+cp .env.example .env
+
+# Windows (PowerShell)
+Copy-Item .env.example .env
+
+# Windows (Command Prompt)
+copy .env.example .env
+```
+
+Open `.env` in your editor and fill in the required values:
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Token from [@BotFather](https://t.me/BotFather) |
+| `AWS_ACCESS_KEY_ID` | Your AWS IAM access key |
+| `AWS_SECRET_ACCESS_KEY` | Your AWS IAM secret key |
+| `AWS_REGION` | AWS region with Bedrock access (e.g. `us-east-1`) |
+| `SUPABASE_URL` | Your Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Supabase service-role key (not the anon key) |
+
+---
+
+### Step 5 — Set Up Supabase Schema
+
+1. Open your Supabase dashboard → **SQL Editor**.
+2. Paste the contents of `schema/supabase_schema.sql`.
+3. Click **Run** to create all required tables (`conversations`, `bot_audit_log`, `products`, `suppliers`, `pricing_rules`) and enable the `pgvector` extension.
+
+---
+
+### Step 6 — Run the Bot
+
+```bash
+python -m bot.main
+```
+
+The bot will start polling Telegram for messages. You should see startup logs in the terminal.
+
+---
+
+### 🐳 Alternative: Run with Docker
+
+If you prefer Docker, you can skip the virtual-environment steps above.
+
+<details>
+<summary><strong>🐧 Linux / macOS</strong></summary>
+
+```bash
+# Make sure .env is configured (Step 4 above), then:
+docker compose up --build -d
+
+# View logs
+docker compose logs -f bot
+```
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows</strong></summary>
+
+1. Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
+2. Make sure Docker Desktop is running.
+3. Open PowerShell in the project directory:
+
+```powershell
+# Make sure .env is configured (Step 4 above), then:
+docker compose up --build -d
+
+# View logs
+docker compose logs -f bot
+```
+
+</details>
+
+To stop the container:
+
+```bash
+docker compose down
+```
+
+---
+
+### Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `python` not recognized (Windows) | Re-install Python and check **"Add Python to PATH"** during setup |
+| `venv\Scripts\Activate.ps1` cannot be loaded | Run `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` in an Admin PowerShell |
+| `ModuleNotFoundError` after install | Make sure the virtual environment is **activated** before running `pip install` |
+| `boto3` / Bedrock auth errors | Verify `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and that Bedrock model access is enabled in the AWS console |
+| Docker build fails on Windows | Ensure Docker Desktop has WSL 2 backend enabled (Settings → General) |
+
+---
+
 ## Architecture
 
 ```
