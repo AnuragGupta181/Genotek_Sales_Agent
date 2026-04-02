@@ -24,30 +24,31 @@ class BedrockModelConfig:
 # ---------------------------------------------------------------------------
 # AWS Bedrock Model Routing
 # 80% Haiku (triage/classification) | 15% Sonnet (drafting) | 5% Opus (complex)
+# Using Amazon Nova models (latest, actively supported, free tier eligible)
 # ---------------------------------------------------------------------------
 BEDROCK_MODELS = {
     "haiku": BedrockModelConfig(
-        model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        model_id="us.amazon.nova-micro-v1:0",
         max_tokens=2048,
         temperature=0.2,
-        cost_per_1m_input=0.25,
-        cost_per_1m_output=1.25,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
         description="Fast triage, classification, follow-up reminders (~80% of tasks)",
     ),
     "sonnet": BedrockModelConfig(
-        model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        model_id="us.amazon.nova-lite-v1:0",
         max_tokens=4096,
         temperature=0.3,
-        cost_per_1m_input=3.00,
-        cost_per_1m_output=15.00,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
         description="Quote drafting, email composition, routing decisions (~15% of tasks)",
     ),
     "opus": BedrockModelConfig(
-        model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        model_id="us.amazon.nova-pro-v1:0",
         max_tokens=4096,
         temperature=0.4,
-        cost_per_1m_input=3.00,
-        cost_per_1m_output=15.00,
+        cost_per_1m_input=0.0,
+        cost_per_1m_output=0.0,
         description="Complex pricing logic, multi-region exceptions (~5% of tasks)",
     ),
 }

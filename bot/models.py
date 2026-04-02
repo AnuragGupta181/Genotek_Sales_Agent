@@ -152,14 +152,33 @@ class ModelRouter:
         model_cfg,
         routing: RoutingResult,
     ) -> LLMResponse:
-        """Call Claude via AWS Bedrock."""
-        body = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": model_cfg.max_tokens,
-            "temperature": model_cfg.temperature,
-            "system": system_prompt,
-            "messages": messages,
-        }
+        """Call model via AWS Bedrock."""
+        model_id_lower = model_cfg.model_id.lower()
+        
+        # Check if using Nova models
+        if "nova" in model_id_lower:
+            # Nova format
+            body = self._build_nova_body(messages, system_prompt, model_cfg)
+        elif "titan" in model_id_lower:
+            # Titan format
+            prompt = self._build_titan_prompt(messages, system_prompt)
+            body = {
+                "inputText": prompt,
+                "textGenerationConfig": {
+                    "maxTokenCount": model_cfg.max_tokens,
+                    "temperature": model_cfg.temperature,
+                    "topP": 0.9,
+                }
+            }
+        else:
+            # Claude format
+            body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": model_cfg.max_tokens,
+                "temperature": model_cfg.temperature,
+                "system": system_prompt,
+                "messages": messages,
+            }
 
         response = self.bedrock_client.invoke_model(
             modelId=model_cfg.model_id,
@@ -170,13 +189,29 @@ class ModelRouter:
 
         result = json.loads(response["body"].read())
 
-        content = ""
-        for block in result.get("content", []):
-            if block.get("type") == "text":
-                content += block["text"]
-
-        tokens_in = result.get("usage", {}).get("input_tokens", 0)
-        tokens_out = result.get("usage", {}).get("output_tokens", 0)
+        # Handle different response formats
+        if "nova" in model_id_lower:
+            # Nova response format
+            content = ""
+            if "output" in result and "message" in result["output"]:
+                content = result["output"]["message"].get("content", [{}])[0].get("text", "")
+            tokens_in = result.get("usage", {}).get("inputTokens", 0)
+            tokens_out = result.get("usage", {}).get("outputTokens", 0)
+        elif "titan" in model_id_lower:
+            # Titan response format
+            content = ""
+            if "results" in result and len(result["results"]) > 0:
+                content = result["results"][0].get("outputText", "")
+            tokens_in = result.get("inputTextTokenCount", 0)
+            tokens_out = result.get("results", [{}])[0].get("tokenCount", 0) if "results" in result else 0
+        else:
+            # Claude response format
+            content = ""
+            for block in result.get("content", []):
+                if block.get("type") == "text":
+                    content += block["text"]
+            tokens_in = result.get("usage", {}).get("input_tokens", 0)
+            tokens_out = result.get("usage", {}).get("output_tokens", 0)
 
         cost = (
             (tokens_in / 1_000_000) * model_cfg.cost_per_1m_input
@@ -191,6 +226,62 @@ class ModelRouter:
             tokens_output=tokens_out,
             cost_estimate=cost,
         )
+
+    def _build_nova_body(self, messages: list[dict], system_prompt: str, model_cfg) -> dict:
+        """Build request body for Amazon Nova models."""
+        # Convert messages to Nova format
+        nova_messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            # Handle content that might be a list
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                content = " ".join(text_parts)
+            
+            nova_messages.append({
+                "role": role,
+                "content": [{"text": content}]
+            })
+        
+        body = {
+            "messages": nova_messages,
+            "inferenceConfig": {
+                "max_new_tokens": model_cfg.max_tokens,
+                "temperature": model_cfg.temperature,
+                "top_p": 0.9,
+            }
+        }
+        
+        if system_prompt:
+            body["system"] = [{"text": system_prompt}]
+        
+        return body
+
+    def _build_titan_prompt(self, messages: list[dict], system_prompt: str) -> str:
+        """Build a prompt string for Titan models from messages."""
+        prompt_parts = []
+        if system_prompt:
+            prompt_parts.append(f"System: {system_prompt}\n")
+        
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Handle content blocks
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                content = " ".join(text_parts)
+            prompt_parts.append(f"{role.capitalize()}: {content}\n")
+        
+        prompt_parts.append("Assistant: ")
+        return "\n".join(prompt_parts)
 
     def _invoke_direct(
         self,
