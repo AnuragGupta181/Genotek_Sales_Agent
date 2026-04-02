@@ -1,197 +1,345 @@
-# Bijon Telegram Bot — V2.1
+# Genotek Sales Support Telegram Bot
 
-A domain-specific Telegram bot for Bijon (construction products) that integrates Claude API, product constraint guardrails, and full audit logging to Supabase.
+A Telegram bot built on **python-telegram-bot**, **LangGraph/LangChain**, **AWS Bedrock** (Claude models), and **Supabase** (pgvector) that serves as a sales support agent for Genotek Global's expansion joint cover business.
 
-**V2.1 adds:** SPEC.md, product eligibility guardrails, `bot_audit_log` audit trail, and escalation rules.
-
----
-
-## Quick Start
-
-```bash
-git clone https://github.com/AnuragGupta181/Bijon_telegram_bot
-cd Bijon_telegram_bot
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env        # fill in your keys
-# Run schema.sql in Supabase SQL Editor
-python bot.py
-```
-
----
-
-## Stack
-
-| Layer | Tool |
-|---|---|
-| Bot framework | `python-telegram-bot` v21 |
-| LLM | Claude (`claude-sonnet-4-20250514`) |
-| Database | Supabase (Postgres) |
-| Runtime | Python 3.12 |
-
----
-
-## Supabase Setup
-
-Run `schema.sql` in Supabase → SQL Editor. Creates 3 tables:
-
-| Table | Purpose |
-|---|---|
-| `conversations` | Full message history per user |
-| `products` | Product constraints — source of truth for guardrails |
-| `bot_audit_log` | Every bot action logged before responding |
-
-### `bot_audit_log` columns
-
-| Column | Type | Description |
-|---|---|---|
-| `action_type` | text | `LLM_RESPONSE`, `QUOTE_GENERATED`, `GUARDRAIL_TRIGGERED`, `PRODUCT_NOT_FOUND`, `ESCALATED`, `HIGH_VALUE_ESCALATION`, `COMPLIANCE_QUERY`, `ERROR` |
-| `input_text` | text | What the user sent |
-| `output_text` | text | What the bot replied |
-| `warnings` | text[] | Guardrail warnings fired |
-| `product_code` | text | Product involved (if any) |
-| `quote_value` | numeric | Estimated quote value in INR |
-| `escalated` | boolean | Whether escalation was triggered |
-
----
-
-## Guardrail: WTZ-1800 Submerged Application (VT-01)
-
-**Test:** Send `"Quote WTZ-1800 for submerged pool joint"`
-
-**Expected:** Guardrail fires, no quote generated, `GUARDRAIL_TRIGGERED` logged, WTZ-3400S suggested.
-
-**How it works:**
-1. Regex extracts `WTZ-1800` from message.
-2. Bot queries `products` table → fetches `disallowed_applications`.
-3. Checks each keyword against user's application description.
-4. `"pool"` matches → guardrail fires before any quote is generated.
-5. Reply sent + audit log written.
-
-WTZ-1800 is blocked for any of: `submerged`, `underwater`, `pool`, `sump`, `tank`, `below-waterline`, `hydrostatic`, `immersion`, `wet-area-floor` — regardless of phrasing.
+Built from verified data: **14,145 emails | 3,565 threads | 211 projects | 18 months**.
 
 ---
 
 ## Architecture
 
 ```
-User (Telegram)
-      │
-      ▼
-  bot.py (python-telegram-bot v21, async polling)
-      │
-      ├─► Compliance keyword check → escalate immediately
-      │
-      ├─► Product code detected?
-      │       ├─► Query Supabase `products` table
-      │       ├─► Check `disallowed_applications` vs user description
-      │       ├─► GUARDRAIL_TRIGGERED → reply + audit log → stop
-      │       └─► Valid → QUOTE_GENERATED → reply + audit log
-      │
-      └─► General query → Claude API → LLM_RESPONSE → reply + audit log
-              │
-              ▼
-         Supabase: bot_audit_log + conversations
+Telegram User
+     |
+     v
+python-telegram-bot (handlers.py)
+     |
+     v
+LangGraph Workflow (graph.py)
+  |-- Node 1: Load conversation history (Supabase)
+  |-- Node 2: Run guardrails (guardrails.py)
+  |       |-- Product constraint checks
+  |       |-- Pricing authority routing
+  |       |-- Discount escalation detection
+  |-- [Conditional] Violation? -> Block + respond with warning
+  |-- Node 3: Route model (models.py)
+  |       |-- Haiku  (~80%) -> triage, classification
+  |       |-- Sonnet (~15%) -> quote drafting, routing
+  |       |-- Opus   (~5%)  -> complex pricing logic
+  |-- Node 4: Generate response (AWS Bedrock)
+  |-- Node 5: Store + Audit (Supabase)
+  |       |-- conversations table (every turn)
+  |       |-- bot_audit_log table (every action)
+     |
+     v
+Response to User
 ```
 
 ---
 
-## (a) Context Degradation in Long Agents
+## Quick Start
 
-In multi-turn LLM agents, context degrades in three ways:
+```bash
+# 1. Clone and install
+pip install -r requirements.txt
 
-**1. Token window pressure** — As history grows, older turns get truncated. Critical early context (e.g. the user's stated application type) is lost while recent messages remain. Mitigated here by capping history at 10 turns (`MAX_HISTORY`).
+# 2. Copy .env.example to .env and fill in credentials
+cp .env.example .env
 
-**2. Attention dilution** — Transformers attend to all tokens, but in very long contexts, early tokens receive less effective attention weight. Constraints stated early ("this is for submerged use") may be effectively ignored even if within the token window.
+# 3. Run Supabase schema (paste schema/supabase_schema.sql in Supabase SQL Editor)
 
-**3. Instruction drift** — System prompt weight diminishes relative to a growing history. The model may gradually drift from its constraints over many turns.
-
-**This bot's approach:** Guardrails are database-driven and deterministic — they never pass through the LLM. Product eligibility is checked in Python code against Supabase, so LLM context degradation cannot bypass them.
-
----
-
-## (b) 5 Escalation Rules
-
-| # | Trigger | Action |
-|---|---|---|
-| ESC-01 | Compliance query (fire rating, IS code, BIS, NBC, structural) | Immediate → engineering team |
-| ESC-02 | Product code not found in `products` table | Cannot quote — flag to team |
-| ESC-03 | Guardrail fires on disallowed application | Hard block + escalate |
-| ESC-04 | Estimated quote ≥ ₹5,00,000 | High-value → human sign-off required |
-| ESC-05 | Claude API error | Ops alert — don't leave user without response |
+# 4. Start the bot
+python -m bot.main
+```
 
 ---
 
-## (c) JIORP Spec — "Generate GCC Quotation"
+## (a) Context Degradation in Long-Running Agents
 
-**Job:** Generate a GCC project quotation for a Bijon product.
+### The Problem
 
-**Input:**
-- Product code (validated against `products` table)
-- Application description (checked against `disallowed_applications`)
-- Quantity (units/sqm/ltr)
-- Site location (GCC country — affects freight and VAT)
+LLMs process text within a fixed context window (Claude 3.5: 200K tokens). In a long-running sales agent that handles 16 quotes/day across months of operation, context degradation manifests in three ways:
 
-**Output:**
-- Product name, code, unit price (USD), extended price, VAT (5%), freight estimate, validity (30 days)
-- Constraint warning if application is borderline
+1. **Attention dilution**: As the context window fills, the model's attention to earlier instructions weakens. Critical rules like "NEVER set prices" can be overridden by patterns in conversation history that implicitly discuss numbers. Research shows instruction-following accuracy drops by 15-30% when context exceeds 100K tokens.
 
-**Rules:**
-- R1: Product must be `is_active = true` in `products` table
-- R2: Application must not match any `disallowed_applications`
-- R3: GCC VAT = 5% flat across all 6 member states
-- R4: Quote > USD 50,000 → escalate to regional manager
-- R5: Every quote logged to `bot_audit_log` with `action_type = QUOTE_GENERATED`
+2. **Recency bias**: The model prioritizes recent conversation turns over system instructions. If the last 5 messages discuss pricing numbers (from a human authority response copied into chat), the model may start generating prices itself, violating SPEC.md CR-1.
 
-**Processing:**
-1. Validate product code → Supabase query
-2. Run application eligibility → guardrail check
-3. Compute extended price + 5% VAT + freight by country
-4. Format output → log to audit → return to user
+3. **Memory hallucination**: In long sessions, the model may "remember" conversations that didn't happen, or merge details from different clients/projects. A quote for a KSA project could contaminate context for a subsequent UAE query.
+
+### Mitigation Strategy in This Bot
+
+| Strategy | Implementation | File |
+|----------|---------------|------|
+| **Rolling window** | Last 20 turns only (configurable via `MAX_CONVERSATION_HISTORY`) | `config.py` |
+| **System prompt anchoring** | Critical rules (no pricing, no discounts, no delivery dates) placed in system prompt, never in conversation history | `config.py` |
+| **Stateless graph execution** | Each message runs a fresh LangGraph invocation with history loaded from DB, not accumulated in memory | `graph.py` |
+| **Embedding-based retrieval** | For long-term memory, pgvector similarity search replaces full history injection | `supabase_client.py` |
+| **Session rotation** | Sessions can be rotated daily/weekly to prevent unbounded growth | `handlers.py` |
+| **Guardrails as hard gates** | Product constraints and pricing rules are checked BEFORE the LLM sees the message, not as prompt instructions the LLM might ignore | `guardrails.py` |
+
+### Why This Matters for Genotek
+
+With 16 quotes/day and conversations spanning regions (UAE, KSA, India, SEA), context contamination is a real risk. A single misrouted pricing request (e.g., India pricing sent to Shylesh instead of Niranjan) could delay a quote by days. The stateless architecture ensures each message is processed with clean context.
 
 ---
 
-## (d) Token Economics
+## (b) Five Escalation Rules
 
-Using `claude-sonnet-4-20250514`:
+These rules are enforced programmatically in `guardrails.py` (not just as LLM instructions):
 
-| Component | Tokens (approx) |
-|---|---|
-| System prompt | ~80 |
-| 10-turn history window | ~1,500 |
-| Product guardrail response | ~100 |
-| **Total input per request** | **~1,700** |
-| **Output per response** | **~150–300** |
+### Rule 1: Pricing Authority by Region
+Every pricing request is routed to the correct human authority based on region. The bot **never** generates a price.
 
-**Cost per turn:**
-- Input: 1,700 × ($3/1M) = $0.0051
-- Output: 225 × ($15/1M) = $0.0034
-- **Total: ~$0.0085/turn**
+| Region | Route To | Condition |
+|--------|----------|-----------|
+| UAE | Shylesh | Items < AED 100/LM |
+| KSA | Bijoy | Deals > SAR 500K |
+| India | Niranjan | All (Pidilite channel) |
+| International | Bijoy | All other regions |
 
-At 1,000 turns/day → ~$8.50/day → ~$255/month.
+### Rule 2: Discount Authority (>15% = Bijoy Always)
+Any discount request above 15% is hard-routed to Bijoy with zero exceptions. Below 15% routes to the regional authority. The bot **never** approves a discount.
 
-**Optimization:** Reduce `MAX_HISTORY` (biggest lever), use Anthropic prompt caching for system prompt, use Haiku for guardrail-only paths that don't need full Sonnet.
+### Rule 3: Product Constraint Violations Block Processing
+If a product is mentioned in an application that violates its constraints (e.g., WTZ-1800 for submerged use), the entire quote routing is **blocked**. No LLM is invoked. A hard-coded warning is returned with an alternative product suggestion.
+
+### Rule 4: Deal Death Detection (96-Day Threshold)
+Quotes older than 96 days with no follow-up are flagged as dead deals. At Day 30, Bijoy is alerted. At Day 60, final re-engagement or archive decision is required.
+
+### Rule 5: Delivery Date Non-Commitment
+The bot **never** commits to a delivery date. It provides known lead time ranges (e.g., "Turkey: 29 days standard", "RY dies: 75-85 days") with an explicit "UNCONFIRMED -- requires supplier verification" disclaimer.
+
+---
+
+## (c) Spec: "Generate GCC Quotation"
+
+### Use Case
+User: "Generate a quotation for the Al Maktoum Airport expansion joint project in Dubai"
+
+### Spec
+
+```
+TRIGGER: User requests quote generation for a GCC (UAE/KSA/Oman/Bahrain/Qatar/Kuwait) project.
+
+PRECONDITIONS:
+  - Product codes identified (from message or conversation history)
+  - Region classified as GCC
+  - Client name/company extracted
+
+FLOW:
+  1. CLASSIFY region -> GCC (specific country)
+  2. CHECK product constraints for all mentioned products
+     - If violation -> BLOCK, return warning, suggest alternatives
+  3. ROUTE pricing to authority:
+     - UAE < AED 100/LM -> Shylesh
+     - KSA > SAR 500K -> Bijoy
+     - All GCC discounts > 15% -> Bijoy
+  4. DRAFT quote shell (template only, NO prices):
+     - File naming: [Country].[ProductType].[ProjectName].[AK].[Rev01]
+     - Greeting: "Dear [Client Name]"
+     - Products listed with codes and descriptions
+     - Placeholder: "[PRICING: Awaiting {authority} approval]"
+     - Sign-off: "Best Regards;"
+     - BCC: tracking copy
+  5. PRESENT draft to AK for review (Trust Level 0)
+  6. LOG to audit trail:
+     - action_type: QUOTE_ROUTE
+     - All products, region, authority, template used
+  7. SCHEDULE follow-up: Day 3/7/14/30 cadence
+
+POSTCONDITIONS:
+  - Quote draft stored in conversations table
+  - Audit log entry created
+  - Follow-up timers set
+  - Pricing request routed to correct authority
+  - NO price numbers in the draft
+
+HARD CONSTRAINTS:
+  - Agent NEVER fills in price fields
+  - Agent NEVER sends to client (Trust Level 0)
+  - Agent NEVER commits delivery dates
+  - All GCC quotes use formal English ("Dear", not "Hello")
+```
+
+---
+
+## (d) Token Economics Math
+
+### Cost Model (AWS Bedrock Pricing)
+
+| Model | Input $/1M tokens | Output $/1M tokens | Usage % | Typical Task |
+|-------|-------------------|---------------------|---------|-------------|
+| Claude 3.5 Haiku | $0.25 | $1.25 | 80% | Triage, classify, remind |
+| Claude 3.5 Sonnet v2 | $3.00 | $15.00 | 15% | Quote drafting, routing |
+| Claude 3 Opus | $5.00 | $25.00 | 5% | Complex pricing logic |
+
+### Daily Volume Estimate
+
+Genotek processes **16 quotes/business day** (VERIFIED from Q1 data).
+
+```
+Per quote interaction (avg):
+  - User message:    ~200 tokens input
+  - System prompt:   ~500 tokens (cached after first call)
+  - History context: ~2,000 tokens (last 20 turns)
+  - Response:        ~400 tokens output
+
+Per quote total: ~2,700 input + ~400 output = ~3,100 tokens
+
+Daily (16 quotes + ~32 follow-up/misc interactions = 48 interactions):
+  - Haiku  (80%, 38 calls): 38 * 3,100 = 117,800 tokens
+  - Sonnet (15%,  7 calls):  7 * 3,100 =  21,700 tokens
+  - Opus   (5%,   3 calls):  3 * 3,100 =   9,300 tokens
+```
+
+### Monthly Cost Calculation (22 business days)
+
+```
+Haiku:
+  Input:  117,800 * 22 = 2,591,600 tokens/mo * $0.25/1M  = $0.65
+  Output:  15,200 * 22 =   334,400 tokens/mo * $1.25/1M  = $0.42
+  Haiku subtotal: $1.07/month
+
+Sonnet:
+  Input:   21,700 * 22 =   477,400 tokens/mo * $3.00/1M  = $1.43
+  Output:   2,800 * 22 =    61,600 tokens/mo * $15.00/1M = $0.92
+  Sonnet subtotal: $2.35/month
+
+Opus:
+  Input:    9,300 * 22 =   204,600 tokens/mo * $5.00/1M  = $1.02
+  Output:   1,200 * 22 =    26,400 tokens/mo * $25.00/1M = $0.66
+  Opus subtotal: $1.68/month
+
+TOTAL LLM COST: ~$5.10/month at current volume
+```
+
+### With Growth Buffer (3x volume)
+
+```
+At 48 quotes/day (3x growth):
+  Total: ~$15.30/month
+
+At 100 quotes/day (extreme growth):
+  Total: ~$31.88/month
+```
+
+### Infrastructure Costs
+
+```
+Supabase:    Free tier (up to 500MB, 50K rows) -> $0/month
+             Pro tier if needed: $25/month
+AWS Bedrock: Pay-per-use (included above)
+Telegram:    Free
+Total:       $5-32/month (LLM) + $0-25/month (Supabase) = $5-57/month
+```
+
+This is well within Bijoy's **$15-40/month** target at normal volume.
+
+### Prompt Caching Economics (from Claude Code Leak)
+
+The system prompt (~500 tokens) is identical across all calls. AWS Bedrock supports prompt caching, which reduces input costs by up to 90% for cached prefixes. With caching:
+
+```
+Effective cost with caching: ~$3-4/month at 16 quotes/day
+```
 
 ---
 
 ## (e) Frameworks Beyond LangChain
 
-| Framework | When to use |
-|---|---|
-| **LangGraph** (used in ccc-ragbot) | Stateful graph agents, multi-step RAG with branching, built-in checkpointing |
-| **CrewAI** | Multi-agent tasks mapped to team roles (researcher + writer + reviewer) |
-| **Haystack** | Document-heavy RAG, enterprise search, production indexing pipelines |
-| **Semantic Kernel** | Azure/.NET stacks, plugin-based agent architecture |
-| **Direct SDK** (this bot) | Guardrail-heavy systems where framework abstraction would hide critical logic |
+### Why Not Just LangChain?
 
-This bot deliberately avoids frameworks — guardrail logic is deterministic and database-driven. Adding LangChain here would add abstraction with no benefit and make it harder to audit the guardrail path.
+LangChain is used here as the **message abstraction layer** (HumanMessage, AIMessage, SystemMessage) and **LangGraph** for the stateful workflow. But for production scaling, several alternatives were evaluated:
+
+### Framework Comparison
+
+| Framework | Strengths | Weaknesses | Genotek Fit |
+|-----------|-----------|------------|-------------|
+| **LangGraph** (used) | Stateful graphs, conditional routing, human-in-the-loop gates | Python only, debugging opaque | HIGH - workflow matches sales support flow |
+| **OpenClaw** (247K GitHub stars) | Open-source, WhatsApp/Telegram native, Skills system (SKILL.md), self-extending, multi-model routing | Security concerns with community skills, newer ecosystem | HIGH for Phase 2 - adds WhatsApp layer for AK |
+| **AgentScope** (Alibaba-backed) | Multi-agent orchestration, ReAct agent, MCP+A2A protocol, memory with compression, visual Studio frontend | Over-engineered for 1-person build, steeper learning curve | MEDIUM - revisit when team grows |
+| **CrewAI** | Multi-agent task delegation, role-based agents, process types (sequential/hierarchical) | Less flexible than LangGraph for custom flows, opinionated architecture | LOW - too rigid for Genotek's escalation matrix |
+| **AutoGen** (Microsoft) | Multi-agent conversation, code execution, group chat patterns | Heavy framework, complex setup, enterprise-oriented | LOW - overkill for 16 quotes/day |
+| **Semantic Kernel** (Microsoft) | .NET/Python/Java, enterprise plugins, planner with LLM | Microsoft ecosystem lock-in, less Python-native feel | LOW - wrong ecosystem |
+| **Haystack** (deepset) | RAG-focused, pipeline architecture, production-ready retrieval | RAG-first design doesn't match sales workflow needs | LOW - wrong primary use case |
+| **DSPy** (Stanford) | Programmatic prompt optimization, automatic few-shot learning | Research-oriented, less production tooling | NICHE - useful for prompt optimization layer |
+
+### Recommended Path
+
+```
+Phase 1 (NOW):   LangGraph + LangChain + AWS Bedrock + Supabase
+                  Reason: Fast to build, matches workflow, Bedrock = enterprise-grade
+
+Phase 2 (Week 2): Add OpenClaw for WhatsApp interface
+                   Reason: AK needs WhatsApp (not just Telegram), native multi-model routing
+
+Phase 3 (Month 2): Evaluate AgentScope for multi-agent orchestration
+                    Reason: When multiple team members use the agent simultaneously
+```
+
+### Why AWS Bedrock Over Direct API?
+
+| Factor | Bedrock | Direct Anthropic API |
+|--------|---------|---------------------|
+| Auth | IAM (existing AWS infra) | API key management |
+| Compliance | SOC2, HIPAA, ISO by default | Requires separate verification |
+| Model access | Claude + Llama + Mistral + Titan | Claude only |
+| Logging | CloudWatch integration | Manual |
+| Cost | Same token pricing | Same token pricing |
+| Latency | ~50-100ms overhead | Direct |
+
+For Genotek: Bedrock is preferred for compliance and multi-model optionality. Direct API is included (commented) as a simpler fallback.
 
 ---
 
-## Issues Hit During Development
+## Project Structure
 
-1. **`python-telegram-bot` v21 async** — Fully async; `Updater` is gone. `ApplicationBuilder` is the correct pattern.
-2. **`service_role` vs `anon` key** — `anon` key blocked server-side inserts due to RLS. `service_role` bypasses RLS for backend writes safely.
-3. **Claude alternating roles** — Strict `user → assistant` alternation required. Appending assistant reply immediately prevents validation errors.
-4. **Postgres `text[]` arrays** — Supabase returns `text[]` columns as Python lists. Iterating `disallowed_applications` works cleanly.
-5. **`load_dotenv()` ordering** — Must be called before any `os.environ[]` reads. First run failed with `KeyError` until this was fixed.
+```
+telegram_bot/
+├── SPEC.md                    # Part 0: Correctness specification
+├── README.md                  # This file
+├── requirements.txt           # Python dependencies
+├── .env.example               # Environment variable template
+├── schema/
+│   └── supabase_schema.sql    # Supabase table creation SQL
+├── bot/
+│   ├── __init__.py
+│   ├── main.py                # Entry point
+│   ├── config.py              # Configuration + model routing constants
+│   ├── models.py              # Model router (Bedrock + direct API)
+│   ├── handlers.py            # Telegram command/message handlers
+│   ├── guardrails.py          # Product constraints + pricing authority
+│   ├── audit.py               # Audit trail logging
+│   ├── supabase_client.py     # Supabase operations
+│   └── graph.py               # LangGraph workflow
+└── tests/
+    ├── __init__.py
+    ├── test_guardrails.py     # Product + pricing + discount tests
+    └── test_models.py         # Model routing tests
+```
+
+---
+
+## Supabase Tables
+
+| Table | Purpose | Key Fields |
+|-------|---------|-----------|
+| `conversations` | Every conversation turn | user_id, role, content, model_used, embedding (pgvector) |
+| `bot_audit_log` | Every bot action | action_type, input_text, output_text, warnings, latency_ms |
+| `products` | Product catalog + constraints | product_code, application_constraints (JSONB), supplier_name |
+| `suppliers` | Supplier data | name, avg_lead_days, payment_status, known_issues |
+| `pricing_rules` | Escalation rules | region, condition_desc, route_to, is_verified |
+
+---
+
+## Running Tests
+
+```bash
+pytest tests/ -v
+```
+
+Tests cover:
+- **VT-1**: WTZ-1800 submerged pool joint constraint violation
+- **VT-2**: Pricing authority routing (UAE -> Shylesh, KSA -> Bijoy, India -> Niranjan)
+- **VT-3**: Discount escalation (>15% -> Bijoy always)
+- **VT-6**: Model routing (simple -> Haiku, medium -> Sonnet, complex -> Opus)
