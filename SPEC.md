@@ -348,3 +348,4 @@ assert result.recommended_action == "SEND_FOLLOWUP_DAY14"
 | Version | Date | Change |
 |---------|------|--------|
 | 0.1 | 2026-04-03 | Initial specification from 18-month email audit | -->
+
